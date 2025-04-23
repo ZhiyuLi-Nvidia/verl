@@ -1,0 +1,28 @@
+set -x
+
+source /lustre/fsw/portfolios/coreai/users/zhiyul/secrets.sh
+
+export HF_HOME="/lustre/fsw/portfolios/coreai/users/zhiyul/hf"
+VERL_DIR="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl"
+CONTAINER="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl/verl-8b-ngc-th2.6.0-cu126-vllm0.8.3-flashinfer0.2.2-cxx11abi0.sqsh"
+NNODES=${NNODES:-1}
+
+
+MOUNTS="\
+/lustre:/lustre,\
+${VERL_DIR}:/opt/verl"
+
+CONTAINER=$CONTAINER \
+MOUNTS=$MOUNTS \
+COMMAND=$COMMAND \
+HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN} \
+WANDB_API_KEY=${WANDB_API_KEY} \
+HF_HOME=/lustre/fsw/portfolios/coreai/users/zhiyul/hf \
+sbatch \
+    --nodes=${NNODES} \
+    --account=coreai_dlalgo_llm \
+    --partition=interactive \
+    --job-name=coreai_dlalgo_llm-rl:verl_8b_vllm-0 \
+    --dependency=singleton \
+    --gres=gpu:8 \
+    ray.sub

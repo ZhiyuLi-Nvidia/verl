@@ -186,6 +186,7 @@ class vLLMRollout(BaseRollout):
         eos_token_id = prompts.meta_info["eos_token_id"]
 
         batch_size = idx.size(0)
+        print(f"generate_sequences/batch_size: {batch_size}")
 
         idx_list = []
         # parse idx from torch.Tensor to List[List[str]]

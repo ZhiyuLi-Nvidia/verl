@@ -18,11 +18,13 @@ The main entry point to run the PPO algorithm
 import logging
 import os
 import warnings
+from typing import Dict
 
 import psutil
 import torch
 import torch.distributed
 from codetiming import Timer
+from contextlib import contextmanager
 from omegaconf import DictConfig, open_dict
 from torch.distributed.device_mesh import init_device_mesh
 
@@ -50,6 +52,15 @@ from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManage
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_PPO_LOGGING_LEVEL", "WARN"))
+
+
+@contextmanager
+def _timer(name: str, timing_raw: Dict[str, float]):
+    with Timer(name=name, logger=None) as timer:
+        yield timer
+    if name not in timing_raw:
+        timing_raw[name] = 0
+    timing_raw[name] += timer.last
 
 
 def create_device_mesh(world_size, fsdp_size):
@@ -498,6 +509,7 @@ class ActorRolloutRefWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
+        timing_raw = {}
         # Support all hardwares
         data = data.to(torch.cuda.current_device())
 
@@ -512,7 +524,7 @@ class ActorRolloutRefWorker(Worker):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data=data)
             # perform training
-            with Timer(name="update_policy", logger=None) as timer:
+            with _timer(name="update_policy", timing_raw=timing_raw) as timer:
                 metrics = self.actor.update_policy(data=data)
             delta_time = timer.last
             global_num_tokens = data.meta_info["global_token_num"]
@@ -540,11 +552,14 @@ class ActorRolloutRefWorker(Worker):
             offload_fsdp_model_to_cpu(self.actor_module_fsdp)
         if self._is_offload_optimizer:
             offload_fsdp_optimizer(optimizer=self.actor_optimizer)
+        
+        output.meta_info["timing_raw"] = timing_raw
 
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def generate_sequences(self, prompts: DataProto):
+        timing_raw = {}
         # Support all hardwares
         prompts = prompts.to(torch.cuda.current_device())
 
@@ -570,9 +585,12 @@ class ActorRolloutRefWorker(Worker):
 
             log_gpu_memory_usage("After entering rollout sharding manager", logger=logger)
 
-            prompts = self.rollout_sharding_manager.preprocess_data(prompts)
-            output = self.rollout.generate_sequences(prompts=prompts)
-            log_gpu_memory_usage("After rollout generation", logger=logger)
+            torch.cuda.synchronize()
+            torch.distributed.barrier()
+            with _timer(name="generate_sequences", timing_raw=timing_raw) as timer:
+                prompts = self.rollout_sharding_manager.preprocess_data(prompts)
+                output = self.rollout.generate_sequences(prompts=prompts)
+                log_gpu_memory_usage("After rollout generation", logger=logger)
 
             output = self.rollout_sharding_manager.postprocess_data(output)
 
@@ -580,6 +598,7 @@ class ActorRolloutRefWorker(Worker):
 
         # clear kv cache
         log_gpu_memory_usage("After generate_sequences", logger=logger)
+        output.meta_info["timing_raw"] = timing_raw
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)

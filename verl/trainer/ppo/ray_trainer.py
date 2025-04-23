@@ -920,6 +920,9 @@ class RayPPOTrainer:
                     # generate a batch
                     with _timer("gen", timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                        timing_raw.update(gen_batch_output.meta_info["timing_raw"])
+                        metrics["gen/batch_size"] = gen_batch_output.batch.batch_size[0]
+
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with _timer("gen_max", timing_raw):
@@ -1037,6 +1040,9 @@ class RayPPOTrainer:
                         with _timer("update_actor", timing_raw):
                             actor_output = self.actor_rollout_wg.update_actor(batch)
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+
+                        actor_output_timing_raw = reduce_metrics(actor_output.meta_info["timing_raw"])
+                        timing_raw.update(actor_output_timing_raw)
                         metrics.update(actor_output_metrics)
 
                     # validate
