@@ -82,6 +82,7 @@ touch $LOG_DIR/STARTED_RAY_HEAD
 export HF_HOME=${HF_HOME}
 export HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
 export WANDB_API_KEY=${WANDB_API_KEY}
+export NNODES=${SLURM_JOB_NUM_NODES}
 env
 cat <<EOFINNER | tee /launch-head.sh
 ray start --head \

@@ -60,7 +60,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.project_name='verl_grpo_example_nvidia_math' \
     trainer.experiment_name='llama3.1_8b_same_param' \
     trainer.n_gpus_per_node=8 \
-    trainer.nnodes=$SLURM_NNODES \
+    trainer.nnodes=${NNODES:-1} \
     trainer.save_freq=-1 \
     trainer.test_freq=-1 \
     trainer.val_before_train=False \
