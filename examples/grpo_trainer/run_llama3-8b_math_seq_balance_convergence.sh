@@ -40,7 +40,7 @@ python3 -m verl.trainer.main_ppo \
     data.truncation='error' \
     actor_rollout_ref.model.path=meta-llama/Llama-3.1-8B-Instruct \
     actor_rollout_ref.actor.optim.lr=3e-7 \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=50 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=13 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=$((train_global_batch_size / num_generations_per_prompt)) \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
@@ -63,7 +63,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_grpo_example_nvidia_math' \
-    trainer.experiment_name='llama3.1_8b_seq_balance_convergence' \
+    trainer.experiment_name='llama3.1_8b_seq_balance_convergence_same_verifier' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=${NNODES:-1} \
     trainer.save_freq=25 \
