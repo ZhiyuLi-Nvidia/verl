@@ -19,7 +19,7 @@ set -x
 source /lustre/fsw/portfolios/coreai/users/zhiyul/secrets.sh
 
 export HF_HOME="/lustre/fsw/portfolios/coreai/users/zhiyul/hf"
-VERL_DIR="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl"
+VERL_DIR="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl-copy"
 CONTAINER="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl/verl-8b-ngc-th2.6.0-cu126-vllm0.8.3-flashinfer0.2.2-cxx11abi0.sqsh"
 NNODES=${NNODES:-1}
 
@@ -39,7 +39,7 @@ sbatch \
     -t $TIME \
     --account=coreai_dlalgo_llm \
     --partition=$PARTITION \
-    --job-name=coreai_dlalgo_llm-rl:verl_8b_vllm \
+    --job-name=coreai_dlalgo_llm-rl:verl_8b_vllm_0 \
     --dependency=singleton \
     --gres=gpu:8 \
     ray.sub
