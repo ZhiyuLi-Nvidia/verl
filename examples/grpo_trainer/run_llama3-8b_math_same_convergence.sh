@@ -51,6 +51,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_type=kl \
     actor_rollout_ref.actor.grad_clip=1.0 \
     actor_rollout_ref.actor.entropy_coeff=0 \
+    actor_rollout_ref.actor.clip_ratio_c=1e20 \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
@@ -66,7 +67,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_grpo_example_nvidia_math' \
-    trainer.experiment_name='llama3.1_8b_seq_balance_convergence_all_same_3072' \
+    trainer.experiment_name='llama3.1_8b_seq_balance_convergence_all_same_3072_disable_duel_clip' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=${NNODES:-1} \
     trainer.save_freq=25 \
