@@ -308,7 +308,11 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     else:
                         from transformers import AutoModelForCausalLM
 
-                        model = AutoModelForCausalLM.from_pretrained(self.config.model.path, torch_dtype="auto")
+                        # Check if this is a DeepSeek model that doesn't accept torch_dtype
+                        if "deepseek" in self.config.model.path.lower():
+                            model = AutoModelForCausalLM.from_pretrained(self.config.model.path, trust_remote_code=True)
+                        else:
+                            model = AutoModelForCausalLM.from_pretrained(self.config.model.path, torch_dtype="auto")
                 model.save_pretrained(hf_model_ckpt_path, state_dict=state_dict)
                 self.processing_class.save_pretrained(hf_model_ckpt_path)
 

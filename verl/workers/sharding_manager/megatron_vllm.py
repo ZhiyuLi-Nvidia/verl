@@ -18,6 +18,8 @@ This file contains a Megatron style Hybrid Engine that shares the weights of the
 import inspect
 import logging
 import os
+import time
+from datetime import datetime
 
 import torch
 import torch.distributed
@@ -39,9 +41,29 @@ from verl.utils.vllm_utils import patch_vllm_moe_model_weight_loader
 
 from .base import BaseShardingManager
 
-logger = logging.getLogger(__file__)
-logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+current_dir = os.path.join(os.getcwd())
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_dir = os.path.join(current_dir, "logs", timestamp)
+os.makedirs(log_dir, exist_ok=True)
 
+global_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+log_file = os.path.join(log_dir, f"per_tensor_generator_rank{global_rank}.log")
+
+# Create a file handler
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+
+# Create a formatter
+formatter = logging.Formatter('%(asctime)s - rank%(rank)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Get logger and add file handler
+base_logger = logging.getLogger(__file__)
+base_logger.setLevel(logging.INFO)
+base_logger.addHandler(file_handler)
+
+# Add rank to logger context
+logger = logging.LoggerAdapter(base_logger, {'rank': global_rank})
 
 """
 Megatron Hybrid Engine:
@@ -99,14 +121,22 @@ class MegatronVLLMShardingManager(BaseShardingManager):
                 "0.5.4",
                 "0.6.3",
             ):
+                start_time = time.time()
                 per_tensor_param = per_tensor_generator(self.actor_module, self.model_config, self.weight_converter, self.transformer_config, self.layer_name_mapping, convert_qkv_gate_up_by_simple_split=False)
                 self.inference_engine.sync_model_weights(per_tensor_param, load_format="megatron")
+                torch.distributed.barrier()
+                logger.info(f"[total] reshard time: {time.time() - start_time}")
+                # Add barrier to ensure generator is consumed
             else:
                 # > 0.7.2
+                start_time = time.time()
                 if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
                     self.inference_engine.wake_up(tags=["weights"])
                 else:
                     self.inference_engine.wake_up()
+                torch.distributed.barrier()
+                logger.info(f"[total] wake_up time: {time.time() - start_time}")
+                start_time = time.time()
                 per_tensor_param = per_tensor_generator(
                     self.actor_module,
                     self.model_config,
@@ -114,9 +144,15 @@ class MegatronVLLMShardingManager(BaseShardingManager):
                     self.transformer_config,
                     self.layer_name_mapping,
                 )
+
                 model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
                 patch_vllm_moe_model_weight_loader(model)
                 loaded_params = model.load_weights(per_tensor_param)
+                # Add barrier to ensure generator is consumed
+                torch.distributed.barrier()
+                logger.info(f"[total] generator and load weights time: {time.time() - start_time}")
+                base_logger.removeHandler(file_handler)
+                file_handler.close()
                 info = f"vLLM load weights, loaded_params: {len(loaded_params)}"
                 logger.info(info)
 

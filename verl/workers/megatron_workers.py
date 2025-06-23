@@ -93,6 +93,8 @@ class ActorRolloutRefWorker(MegatronWorker):
 
             if self.config.actor.megatron.sequence_parallel:
                 os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+            print(f"self.config.actor.megatron.expert_model_parallel_size: {self.config.actor.megatron.expert_model_parallel_size}")
+            print(f"self.config.actor.megatron.expert_tensor_parallel_size: {self.config.actor.megatron.expert_tensor_parallel_size}")
             mpu.initialize_model_parallel(
                 tensor_model_parallel_size=self.config.actor.megatron.tensor_model_parallel_size,
                 pipeline_model_parallel_size=self.config.actor.megatron.pipeline_model_parallel_size,

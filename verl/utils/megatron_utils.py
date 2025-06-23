@@ -36,6 +36,7 @@ from transformers import PretrainedConfig
 import verl.utils.megatron.tensor_parallel as tp_utils
 from verl.utils.model import normalize_model_name
 from verl.utils.torch_dtypes import PrecisionType
+import logging
 
 
 def get_model_config(model):
@@ -749,7 +750,63 @@ def default_tp_concat_fn(layer_name_mapping, name, train_params, infer_params, m
 
 def per_tensor_generator(actor_module, model_config, weight_converter, transformer_config, layer_name_mapping, convert_qkv_gate_up_by_simple_split=True):
     from megatron.core import parallel_state as mpu
+    import time
+    import logging
+    import os
+    from datetime import datetime
 
+    # Configure file logging with absolute path
+    current_dir = os.path.join(os.getcwd())
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = os.path.join(current_dir, "logs", timestamp)
+    os.makedirs(log_dir, exist_ok=True)
+    
+    global_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    log_file = os.path.join(log_dir, f"per_tensor_generator_rank{global_rank}.log")
+    
+    # Create a file handler
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+    
+    # Create a formatter
+    formatter = logging.Formatter('%(asctime)s - rank%(rank)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    
+    # Get logger and add file handler
+    base_logger = logging.getLogger(__file__)
+    base_logger.setLevel(logging.INFO)
+    base_logger.addHandler(file_handler)
+
+    # Add rank to logger context
+    logger = logging.LoggerAdapter(base_logger, {'rank': global_rank})
+
+    timing = {
+        "init": 0,
+        "tensor_generator": 0,
+        "meta_info_collection": 0,
+        "all_gather_meta": 0,
+        "tensor_processing": 0,
+        "expert_processing": 0,
+        "tp_processing": 0,
+        "total_time": 0
+    }
+    comm_timing = {
+        "all_gather": 0,
+        "broadcast": 0,
+        "all_gather_object": 0,
+        "broadcast_object": 0
+    }
+    comm_counts = {
+        "all_gather": 0,
+        "broadcast": 0,
+        "all_gather_object": 0,
+        "broadcast_object": 0
+    }
+    yield_count = 0
+    start_time = time.time()
+    
+    # Init timing
+    init_start = time.time()
     pp_rank = mpu.get_pipeline_model_parallel_rank()
     ep_size = mpu.get_expert_model_parallel_world_size()
     etp_size = mpu.get_expert_tensor_parallel_world_size()
@@ -758,23 +815,26 @@ def per_tensor_generator(actor_module, model_config, weight_converter, transform
     vpp_size = len(actor_module)
     all_gather_group = mpu.get_tensor_model_parallel_group()
     all_gather_group_size = torch.distributed.get_world_size(group=all_gather_group)
+    timing["init"] = time.time() - init_start
 
     def tensor_generator():
+        nonlocal yield_count
+        gen_start_time = time.time()
         for scan_vpp_idx in range(vpp_size):
             existing_keys = set()
             model = unwrap_model(actor_module[scan_vpp_idx])
             for name, param in model.named_parameters():
                 existing_keys.add(name)
+                yield_count += 1
                 yield name, param
-            # note
-            # there is a bug in megatron GPTModel
-            # decoder.layers[n].mlp.router.expert_bias" in GPTModel is not registered in named_parameter, but in state_dict().
-            # for now we patch it by adding those keys to extra_keys.
             extra_keys = [x for x in model.state_dict().keys() if "_extra_state" not in x and x not in existing_keys]
             for name in extra_keys:
+                yield_count += 1
                 yield name, model.state_dict()[name].to(torch.cuda.current_device())
+        timing["tensor_generator"] = time.time() - gen_start_time
 
     # we need first make all rank get full model information
+    meta_start = time.time()
     meta_info = []
     for scan_vpp_idx in range(vpp_size):
         existing_keys = set()
@@ -785,18 +845,24 @@ def per_tensor_generator(actor_module, model_config, weight_converter, transform
         extra_keys = [x for x in model.state_dict().keys() if "_extra_state" not in x and x not in existing_keys]
         for name in extra_keys:
             meta_info.append((pp_rank, scan_vpp_idx, idx, name))
+    timing["meta_info_collection"] = time.time() - meta_start
 
+    gather_start = time.time()
     obj_spec_output = [None] * mpu.get_pipeline_model_parallel_world_size()
+    comm_start = time.time()
     torch.distributed.all_gather_object(object_list=obj_spec_output, obj=meta_info, group=mpu.get_pipeline_model_parallel_group())
+    comm_timing["all_gather_object"] += time.time() - comm_start
+    comm_counts["all_gather_object"] += 1
     layer_list_meta = [item for sublist in obj_spec_output for item in sublist]
+    timing["all_gather_meta"] = time.time() - gather_start
 
     gen_func = tensor_generator()
 
     # lazy load tensor for full model
+    processing_start_time = time.time()
     for cur_pp_rank, scan_vpp_idx, idx, name in layer_list_meta:
         if model_config.tie_word_embeddings and ("output_layers" in name):
             import warnings
-
             warnings.warn("Current model sharing word and embedding weights, skip output layer conversion", stacklevel=2)
             continue
 
@@ -810,8 +876,15 @@ def per_tensor_generator(actor_module, model_config, weight_converter, transform
             cur_tensor, cur_name = None, None
 
         # pp broadcast model tensor and name
+        comm_start = time.time()
         cur_name = broadcast_str_from_megatron_pp(cur_name)
+        comm_timing["broadcast_object"] += time.time() - comm_start
+        comm_counts["broadcast_object"] += 1
+
+        comm_start = time.time()
         broad_pp_tensor = broadcast_from_megatron_pp(cur_tensor)
+        comm_timing["broadcast"] += time.time() - comm_start
+        comm_counts["broadcast"] += 1
 
         # (xya): this is a hack to fix the name of the parameters
         while cur_name.startswith("module."):
@@ -819,10 +892,15 @@ def per_tensor_generator(actor_module, model_config, weight_converter, transform
 
         # EP
         if ".mlp.experts.linear_fc" in cur_name and ep_size > 1:
+            expert_start_time = time.time()
             num_experts = weight_converter.mcore_config.num_moe_experts
             num_experts_per_rank = num_experts // ep_size
             infer_params = [torch.empty_like(broad_pp_tensor) for _ in range(ep_size)]
+            
+            comm_start = time.time()
             torch.distributed.all_gather(infer_params, broad_pp_tensor, group=ep_group)
+            comm_timing["all_gather"] += time.time() - comm_start
+            comm_counts["all_gather"] += 1
 
             name_prefix, local_expert_id = cur_name.split(".weight")
             local_expert_id = int(local_expert_id)
@@ -833,7 +911,10 @@ def per_tensor_generator(actor_module, model_config, weight_converter, transform
                 if etp_size > 1:
                     # gather etp
                     etp_params = [torch.empty_like(param) for _ in range(etp_size)]
+                    comm_start = time.time()
                     torch.distributed.all_gather(etp_params, param, group=etp_group)
+                    comm_timing["all_gather"] += time.time() - comm_start
+                    comm_counts["all_gather"] += 1
                     params = etp_params
                 else:
                     params = [param]
@@ -843,17 +924,23 @@ def per_tensor_generator(actor_module, model_config, weight_converter, transform
                     merge_params = [merge_params]
                 converted_names, converted_params = weight_converter.convert_param(name, merge_params)
 
+                yield_count += len(converted_names)
                 yield from zip(converted_names, converted_params)
+            timing["expert_processing"] += time.time() - expert_start_time
             continue
 
         # tp all gather
+        tp_start_time = time.time()
         if tp_utils.is_tensor_parallel_param(broad_pp_tensor):
             # allocate a new tensor with proper size
             if all_gather_group_size <= 1:
                 infer_params = [broad_pp_tensor]
             else:
                 infer_params = [torch.empty_like(broad_pp_tensor) for _ in range(all_gather_group_size)]
+                comm_start = time.time()
                 torch.distributed.all_gather(infer_params, broad_pp_tensor, group=mpu.get_tensor_model_parallel_group())
+                comm_timing["all_gather"] += time.time() - comm_start
+                comm_counts["all_gather"] += 1
             infer_params = default_tp_concat_fn(layer_name_mapping, cur_name, broad_pp_tensor, infer_params, model_config, weight_converter.hf_config, convert_qkv_gate_up_by_simple_split)
         else:
             infer_params = broad_pp_tensor
@@ -862,7 +949,29 @@ def per_tensor_generator(actor_module, model_config, weight_converter, transform
             infer_params = [infer_params]
         converted_names, converted_params = weight_converter.convert_param(cur_name, infer_params)
 
+        yield_count += len(converted_names)
         yield from zip(converted_names, converted_params)
+        timing["tp_processing"] += time.time() - tp_start_time
+
+    timing["tensor_processing"] = time.time() - processing_start_time
+    timing["total_time"] = time.time() - start_time
+
+    # Log timing information
+    logger.info(f"per_tensor_generator total yields: {yield_count}")
+    for key, value in timing.items():
+        logger.info(f"per_tensor_generator {key}: {value:.4f}s")
+        if key != "total_time":
+            logger.info(f"per_tensor_generator {key} per yield: {value/yield_count:.4f}s")
+    
+    # Log communication timing
+    logger.info("\nCommunication Profiling:")
+    for comm_type in comm_timing:
+        if comm_counts[comm_type] > 0:
+            logger.info(f"{comm_type}: Total time: {comm_timing[comm_type]:.4f}s\nTotal calls: {comm_counts[comm_type]}\nAverage time per call: {comm_timing[comm_type]/comm_counts[comm_type]:.4f}s")
+    
+    # Remove the file handler to avoid keeping the file open
+    base_logger.removeHandler(file_handler)
+    file_handler.close()
 
 
 def get_transformer_layer_offset(pipeline_rank, vp_rank, config: TransformerConfig):

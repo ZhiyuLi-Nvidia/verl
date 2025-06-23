@@ -144,7 +144,6 @@ def hf_to_mcore_config_qwen2moe(hf_config: PretrainedConfig, dtype: torch.dtype,
         moe_router_topk=hf_config.num_experts_per_tok,
         num_moe_experts=hf_config.num_experts,
         moe_shared_expert_intermediate_size=hf_config.shared_expert_intermediate_size,
-        moe_aux_loss_coeff=hf_config.router_aux_loss_coef,
         # moe_aux_loss_coeff=0.0,
         moe_router_load_balancing_type="none",  # turn off aux_loss as it hurts perf in RL
         moe_shared_expert_overlap=True,
@@ -261,12 +260,10 @@ def hf_to_mcore_config_dpskv3(hf_config: PretrainedConfig, dtype: torch.dtype, *
         # Standard MoE parameters
         moe_ffn_hidden_size=hf_config.moe_intermediate_size,
         moe_token_dispatcher_type="alltoall",
-        moe_router_bias_update_rate=0.001,
         moe_router_enable_expert_bias=True,
         moe_router_topk=hf_config.num_experts_per_tok,
         num_moe_experts=hf_config.n_routed_experts,
         moe_shared_expert_intermediate_size=hf_config.moe_intermediate_size * hf_config.n_shared_experts,
-        moe_aux_loss_coeff=getattr(hf_config, "aux_loss_alpha", 0.001),
         moe_router_load_balancing_type="seq_aux_loss",
         moe_shared_expert_overlap=True,
         # moe_permute_fusion=True, # need TE 2.1+

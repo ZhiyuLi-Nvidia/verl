@@ -132,6 +132,7 @@ class RLHFDataset(Dataset):
             dataframe = datasets.load_dataset("parquet", data_files=parquet_file)["train"]
             dataframes.append(dataframe)
         self.dataframe: datasets.Dataset = datasets.concatenate_datasets(dataframes)
+        self.dataframe = self.dataframe.select(range(1000))
 
         print(f"dataset len: {len(self.dataframe)}")
 
