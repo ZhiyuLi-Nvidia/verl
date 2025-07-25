@@ -192,6 +192,8 @@ class vLLMRollout(BaseRollout):
             n=1,
             logprobs=0,  # can be set to 0 and let actor to recompute
             max_tokens=config.response_length,
+            stop_token_ids=[tokenizer.eos_token_id],
+            include_stop_str_in_output=True,
         )
 
         kwargs["detokenize"] = False
@@ -315,6 +317,16 @@ class vLLMRollout(BaseRollout):
                 ] * batch_size
 
         # users can customize different sampling_params at different run
+        # Print the exact string passed to vLLM inference engine (first one only)
+        # if torch.distributed.get_rank() == 0:
+        #     if vllm_inputs:
+        #         tokenizer = self.inference_engine.llm_engine.tokenizer.tokenizer
+        #         first_input = vllm_inputs[0]
+        #         prompt_token_ids = first_input["prompt_token_ids"]
+        #         prompt_string = tokenizer.decode(prompt_token_ids, skip_special_tokens=False)
+        #         print(f"prompt_string: {repr(prompt_string)}", flush=True)
+
+        
         with self.update_sampling_params(**kwargs):
             outputs = self.inference_engine.generate(
                 prompts=vllm_inputs,  # because we have already convert it to prompt token id
@@ -322,6 +334,9 @@ class vLLMRollout(BaseRollout):
                 lora_request=lora_requests,
                 use_tqdm=False,
             )
+            # if torch.distributed.get_rank() == 0:
+            #     print(f"actual sampling_params: {self.sampling_params}")
+            #     print(f"sampling_params.stop_token_ids: {self.sampling_params.stop_token_ids}")
 
             # TODO(sgm): disable logprob when recompute_log_prob is enable
             # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
@@ -337,6 +352,11 @@ class vLLMRollout(BaseRollout):
                         for i, logprob in enumerate(output.outputs[sample_id].logprobs):
                             curr_log_prob.append(logprob[response_ids[i]].logprob)
                         rollout_log_probs.append(curr_log_prob)
+                    # tokenizer = self.inference_engine.llm_engine.tokenizer.tokenizer
+                    # prompt_str = tokenizer.decode(vllm_inputs[sample_id]['prompt_token_ids'], skip_special_tokens=False)
+                    # response_str = tokenizer.decode(response_ids, skip_special_tokens=False)
+                    # with open("response.txt", "a") as f:
+                    #     f.write(f"prompt: {repr(prompt_str)}\nresponse: {repr(response_str)}\n")
 
             response = pad_2d_list_to_length(response, self.pad_token_id, max_length=self.config.response_length).to(
                 idx.device

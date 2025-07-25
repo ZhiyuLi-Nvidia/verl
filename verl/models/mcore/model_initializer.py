@@ -68,6 +68,7 @@ class BaseModelInitializer(ABC):
         transformer_layer_spec = self.get_transformer_layer_spec()
         rope_scaling_args = self.get_rope_scaling_args()
         mtp_block_spec = extra_kwargs.get("mtp_block_spec", None)
+        # assert self.tfconfig.apply_rope_fusion, "apply_rope_fusion must be True"
         model = GPTModel(
             config=self.tfconfig,
             transformer_layer_spec=transformer_layer_spec,

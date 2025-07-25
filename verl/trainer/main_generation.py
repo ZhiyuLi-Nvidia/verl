@@ -38,6 +38,7 @@ from verl.utils.fs import copy_to_local
 from verl.utils.hdfs_io import makedirs
 from verl.utils.model import compute_position_id_with_mask
 from verl.workers.fsdp_workers import ActorRolloutRefWorker
+import torch
 
 
 @hydra.main(config_path="config", config_name="generation", version_base=None)
@@ -128,6 +129,8 @@ def main_task(config):
                 valid_response_ids = data_item.batch["responses"][:valid_response_length]
                 response_str = tokenizer.decode(valid_response_ids, skip_special_tokens=True)
                 output_texts.append(response_str)
+                # if torch.distributed.get_rank() == 0 and i == 0:
+                #     print(f"response_str: {repr(response_str)}", flush=True)
 
             output_lst[n_sample].extend(output_texts)
 
