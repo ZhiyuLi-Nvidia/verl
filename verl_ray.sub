@@ -1,0 +1,47 @@
+set -x
+
+source /lustre/fsw/portfolios/coreai/users/zhiyul/secrets.sh
+
+export HF_HOME="/lustre/fsw/portfolios/coreai/users/zhiyul/hf"
+VERL_DIR="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl"
+# CONTAINER="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl-8b-ngc-th2.6.0-cu126-vllm0.8.3-flashinfer0.2.2-cxx11abi0.sqsh"
+# CONTAINER="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl-ngc-cu124-vllm0.8.5-sglang0.4.6.post5-mcore0.12.1-te2.3-deepseekv3.sqsh"
+# CONTAINER=/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl-ngc-cu124-vllm0.9.0-sglang0.4.6.post5-mcore0.12.1-te2.3-deepseekv3-nsys.sqsh
+CONTAINER="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl-ngc-cu124-vllm0.8.5-sglang0.4.6.post5-mcore0.12.1-te2.3-deepseekv3-nsys.sqsh"
+NNODES=${NNODES:-1}
+ACCOUNT=${ACCOUNT:-coreai_dlalgo_genai}
+
+# Default to short run
+LONG_RUN=${LONG_RUN:-false}
+
+# Set partition and time based on LONG_RUN
+if [ "$LONG_RUN" = true ]; then
+  # Long run settings
+  PARTITION="batch"
+  TIME="2:00:00"
+else
+  # Short run settings
+  PARTITION="interactive"
+  TIME="2:00:00"
+fi
+
+
+MOUNTS="\
+/lustre:/lustre,\
+${VERL_DIR}:/opt/verl"
+
+CONTAINER=$CONTAINER \
+MOUNTS=$MOUNTS \
+COMMAND=$COMMAND \
+HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN} \
+WANDB_API_KEY=${WANDB_API_KEY} \
+HF_HOME=/lustre/fsw/portfolios/coreai/users/zhiyul/hf \
+sbatch \
+    -t $TIME \
+    --nodes=${NNODES} \
+    --account=$ACCOUNT \
+    --partition=$PARTITION \
+    --job-name=$ACCOUNT-$PARTITION-rl_0:verl_8b_vllm_0 \
+    --dependency=singleton \
+    --gres=gpu:8 \
+    ray.sub

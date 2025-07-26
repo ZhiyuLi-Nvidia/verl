@@ -12,7 +12,7 @@ else
     python3 examples/data_preprocess/nvidia_math_dataset.py --local_dir $processed_data_dir
 fi
 
-export VLLM_ATTENTION_BACKEND=XFORMERS
+# export VLLM_ATTENTION_BACKEND=XFORMERS
 
 math_train_path=/opt/verl/$processed_data_dir/train.parquet
 math_test_path=/opt/verl/$processed_data_dir/test.parquet
@@ -46,7 +46,7 @@ python3 -m verl.trainer.main_ppo \
     data.truncation='error' \
     data.shuffle=False \
     actor_rollout_ref.model.path=meta-llama/Llama-3.1-8B-Instruct \
-    actor_rollout_ref.actor.optim.lr=3e-7 \
+    actor_rollout_ref.actor.optim.lr=0. \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.actor.ppo_mini_batch_size=$((train_global_batch_size / num_generations_per_prompt)) \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
@@ -61,7 +61,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.enforce_eager=True \
+    actor_rollout_ref.rollout.enforce_eager=False \
+    actor_rollout_ref.rollout.max_model_len=4096 \
     actor_rollout_ref.rollout.n=$num_generations_per_prompt \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \

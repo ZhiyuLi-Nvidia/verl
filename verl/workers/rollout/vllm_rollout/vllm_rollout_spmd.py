@@ -143,7 +143,7 @@ class vLLMRollout(BaseRollout):
                              please increase max_num_batched_tokens or disable chunked prefill"
             )
 
-        trust_remote_code = kwargs.get("trust_remote_code", False)
+        trust_remote_code = kwargs.get("trust_remote_code", True)
         load_format = "dummy" if config.load_format.startswith("dummy") else config.load_format
 
         lora_kwargs = kwargs.pop("lora_kwargs", {})
@@ -161,28 +161,32 @@ class vLLMRollout(BaseRollout):
         engine_kwargs = {key: val for key, val in engine_kwargs.items() if val is not None}
         if config.get("limit_images", None):  # support for multi-image data
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
-
-        self.inference_engine = LLM(
-            model=model_path,
-            enable_sleep_mode=config.free_cache_engine,
-            tensor_parallel_size=tensor_parallel_size,
-            distributed_executor_backend="external_launcher",
-            dtype=config.dtype,
-            enforce_eager=config.enforce_eager,
-            gpu_memory_utilization=config.gpu_memory_utilization,
-            disable_custom_all_reduce=True,
-            skip_tokenizer_init=False,
-            max_model_len=max_model_len,
-            load_format=load_format,
-            disable_log_stats=config.disable_log_stats,
-            max_num_batched_tokens=max_num_batched_tokens,
-            enable_chunked_prefill=config.enable_chunked_prefill,
-            enable_prefix_caching=True,
-            trust_remote_code=trust_remote_code,
-            seed=config.get("seed", 0),
+        
+        llm_kwargs = {
+            "model": model_path,
+            "enable_sleep_mode": config.free_cache_engine,
+            "tensor_parallel_size": tensor_parallel_size,
+            "distributed_executor_backend": "external_launcher",
+            "dtype": config.dtype,
+            "enforce_eager": config.enforce_eager,
+            "gpu_memory_utilization": config.gpu_memory_utilization,
+            "skip_tokenizer_init": True,
+            "max_model_len": max_model_len,
+            "load_format": load_format,
+            "disable_log_stats": config.disable_log_stats,
+            "enable_prefix_caching": True,
+            "trust_remote_code": trust_remote_code,
+            "seed": config.get("seed", 0),
             **lora_kwargs,
             **engine_kwargs,
+        }
+
+        self.inference_engine = LLM(
+            **llm_kwargs,
         )
+        print(f"llm_kwargs: {llm_kwargs}")
+        print(f"inference_engine: {self.inference_engine}")
+        print(f"tokenizer: {self.inference_engine.get_tokenizer()}")
 
         # Offload vllm model to reduce peak memory usage
         if config.free_cache_engine:
@@ -334,9 +338,8 @@ class vLLMRollout(BaseRollout):
                 lora_request=lora_requests,
                 use_tqdm=False,
             )
-            # if torch.distributed.get_rank() == 0:
-            #     print(f"actual sampling_params: {self.sampling_params}")
-            #     print(f"sampling_params.stop_token_ids: {self.sampling_params.stop_token_ids}")
+            if torch.distributed.get_rank() == 0:
+                print(f"actual sampling_params: {self.sampling_params}", flush=True)
 
             # TODO(sgm): disable logprob when recompute_log_prob is enable
             # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
