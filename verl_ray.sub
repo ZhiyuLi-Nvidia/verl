@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Default to short run
+LONG_RUN=${LONG_RUN:-false}
+
+# Set partition and time based on LONG_RUN
+if [ "$LONG_RUN" = true ]; then
+  # Long run settings
+  PARTITION="batch"
+  TIME="4:00:00"
+else
+  # Short run settings
+  PARTITION="interactive"
+  TIME="2:00:00"
+fi
+
+set -x
+
+source /lustre/fsw/portfolios/coreai/users/zhiyul/secrets.sh
+
+export HF_HOME="/lustre/fsw/portfolios/coreai/users/zhiyul/hf"
+VERL_DIR="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl"
+CONTAINER="/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/verl0.5-transformers4.55.4-vllm0.10.0-mcore0.13.0-te2.2.sqsh"
+NNODES=${NNODES:-1}
+
+
+MOUNTS="\
+/lustre:/lustre,\
+${VERL_DIR}:/opt/verl"
+
+CONTAINER=$CONTAINER \
+MOUNTS=$MOUNTS \
+COMMAND=$COMMAND \
+HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN} \
+WANDB_API_KEY=${WANDB_API_KEY} \
+HF_HOME=/lustre/fsw/portfolios/coreai/users/zhiyul/hf \
+sbatch \
+    -N $NNODES \
+    -t $TIME \
+    --account=coreai_dlalgo_nemorl \
+    --partition=$PARTITION \
+    --job-name=coreai_dlalgo_nemorl:verl_0.5_vllm_0 \
+    --dependency=singleton \
+    --gres=gpu:8 \
+    ray.sub
